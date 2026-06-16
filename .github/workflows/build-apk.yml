@@ -5,7 +5,7 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:   # allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   build:
@@ -23,17 +23,21 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Set up Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+
+      - name: Accept all Android SDK licenses
+        run: |
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" || true
 
       - name: Grant gradlew execute permission
         run: chmod +x gradlew
 
       - name: Create local.properties
-        run: |
-          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-        # API keys are injected via GitHub Secrets (Settings → Secrets → Actions)
-        # Add GROQ_API_KEY secret in your GitHub repo settings
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
@@ -71,15 +75,8 @@ jobs:
           name: JAVIS ${{ github.ref_name }}
           body: |
             ## JAVIS ${{ github.ref_name }}
-            
             Download the APK below and install it on your Android device.
-            
-            **Debug APK** — ready to install (sideload), includes debug logs  
-            **Release APK** — optimised, unsigned (sign before distributing)
-            
-            ### Install Instructions
-            1. Download `app-debug.apk`
-            2. Enable "Install from unknown sources" in Android Settings
-            3. Open the APK file on your device
+            **Debug APK** — ready to sideload  
+            **Release APK** — optimised, unsigned
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
