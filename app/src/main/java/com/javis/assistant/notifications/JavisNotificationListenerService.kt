@@ -1,10 +1,8 @@
 package com.javis.assistant.notifications
 
-import android.app.PendingIntent
+import android.app.RemoteInput
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import androidx.core.app.NotificationCompat
-import androidx.core.app.RemoteInput
 import com.javis.assistant.domain.model.NotificationItem
 import com.javis.assistant.domain.repository.NotificationRepository
 import com.javis.assistant.whatsapp.WhatsAppReplyManager
@@ -36,8 +34,8 @@ class JavisNotificationListenerService : NotificationListenerService() {
 
     private val whatsAppPackages = setOf(
         "com.whatsapp",
-        "com.whatsapp.w4b",        // WhatsApp Business
-        "com.gbwhatsapp",           // GB WhatsApp
+        "com.whatsapp.w4b",
+        "com.gbwhatsapp",
         "com.whatsapp.plus"
     )
 
@@ -53,68 +51,80 @@ class JavisNotificationListenerService : NotificationListenerService() {
 
         val appName = getAppName(sbn.packageName)
 
-        // Store in local DB
-        val item = NotificationItem(
-            packageName = sbn.packageName,
-            appName = appName,
-            title = title,
-            text = text,
-            timestamp = sbn.postTime
-        )
-        serviceScope.launch { notificationRepository.insertNotification(item) }
+        serviceScope.launch {
+            notificationRepository.insertNotification(
+                NotificationItem(
+                    packageName = sbn.packageName,
+                    appName = appName,
+                    title = title,
+                    text = text,
+                    timestamp = sbn.postTime
+                )
+            )
+        }
 
-        // Special handling for WhatsApp — capture reply action
         if (sbn.packageName in whatsAppPackages) {
-            captureWhatsAppReplyAction(sbn, title, text)
+            captureWhatsAppReplyAction(sbn, sender = title, message = text)
         }
     }
 
-    private fun captureWhatsAppReplyAction(sbn: StatusBarNotification, sender: String, message: String) {
-        val actions = sbn.notification?.actions ?: return
+    private fun captureWhatsAppReplyAction(
+        sbn: StatusBarNotification,
+        sender: String,
+        message: String
+    ) {
+        val actions = sbn.notification?.actions ?: run {
+            // Still store message even without reply capability
+            storeWhatsAppMessage(sender, message, sbn.postTime, null, null, null)
+            return
+        }
 
-        // Find the Reply action
+        // Find the Reply action by checking action labels
         val replyAction = actions.firstOrNull { action ->
             val label = action.title?.toString()?.lowercase() ?: ""
-            label.contains("reply") || label.contains("respond") || label.contains("repl")
-        } ?: actions.firstOrNull() // fallback to first action if no obvious reply action
+            label.contains("reply") || label.contains("respond")
+        } ?: actions.firstOrNull { it.remoteInputs?.isNotEmpty() == true }
 
         if (replyAction != null) {
-            // Extract RemoteInput for typing the reply
-            val remoteInputs = RemoteInput.getInputsFromIntent(replyAction.actionIntent?.intent ?: return)
-                ?: replyAction.remoteInputs?.map {
-                    RemoteInput.Builder(it.resultKey)
-                        .setLabel(it.label)
-                        .build()
-                }?.toTypedArray()
+            // remoteInputs are android.app.RemoteInput[] — directly from framework
+            val inputs: Array<RemoteInput>? = replyAction.remoteInputs
+            val key = inputs?.firstOrNull()?.resultKey ?: "text_reply"
 
-            val key = remoteInputs?.firstOrNull()?.resultKey
-                ?: replyAction.remoteInputs?.firstOrNull()?.resultKey
-
-            val msg = WhatsAppReplyManager.WhatsAppMessage(
+            storeWhatsAppMessage(
                 sender = sender,
                 message = message,
                 timestamp = sbn.postTime,
                 replyPendingIntent = replyAction.actionIntent,
-                remoteInputKey = key ?: "text_reply",
-                remoteInputs = remoteInputs
+                remoteInputKey = key,
+                remoteInputs = inputs
             )
-            whatsAppReplyManager.onWhatsAppNotification(msg)
         } else {
-            // Still store the message even if we can't reply
-            val msg = WhatsAppReplyManager.WhatsAppMessage(
-                sender = sender,
-                message = message,
-                timestamp = sbn.postTime,
-                replyPendingIntent = null,
-                remoteInputKey = null,
-                remoteInputs = null
-            )
-            whatsAppReplyManager.onWhatsAppNotification(msg)
+            storeWhatsAppMessage(sender, message, sbn.postTime, null, null, null)
         }
     }
 
+    private fun storeWhatsAppMessage(
+        sender: String,
+        message: String,
+        timestamp: Long,
+        replyPendingIntent: android.app.PendingIntent?,
+        remoteInputKey: String?,
+        remoteInputs: Array<RemoteInput>?
+    ) {
+        whatsAppReplyManager.onWhatsAppNotification(
+            WhatsAppReplyManager.WhatsAppMessage(
+                sender = sender,
+                message = message,
+                timestamp = timestamp,
+                replyPendingIntent = replyPendingIntent,
+                remoteInputKey = remoteInputKey,
+                remoteInputs = remoteInputs
+            )
+        )
+    }
+
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
-        // Keep in local DB for history — intentional
+        // Keep in local DB for history
     }
 
     private fun getAppName(packageName: String): String {
