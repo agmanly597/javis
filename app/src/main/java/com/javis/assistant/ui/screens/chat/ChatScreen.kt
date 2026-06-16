@@ -99,16 +99,10 @@ fun ChatScreen(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 120.dp),
                 onClick = {
-                    when (uiState.voiceState) {
-                        is VoiceState.Listening -> viewModel.stopListening()
-                        is VoiceState.Speaking -> viewModel.stopSpeaking()
-                        else -> {
-                            if (micPermission.status.isGranted) {
-                                viewModel.startListening()
-                            } else {
-                                micPermission.launchPermissionRequest()
-                            }
-                        }
+                    if (micPermission.status.isGranted) {
+                        viewModel.onMicTapped()
+                    } else {
+                        micPermission.launchPermissionRequest()
                     }
                 }
             )
