@@ -31,25 +31,26 @@ class VoiceManager @Inject constructor(
     private var onSpeechResult: ((String) -> Unit)? = null
     private var onSpeechEnd: (() -> Unit)? = null
 
-    // Default JAVIS voice profile — deep, authoritative, British-ish
     private var currentPitch = JAVIS_PITCH
     private var currentRate = JAVIS_RATE
 
     companion object {
-        const val JAVIS_PITCH = 0.82f    // Slightly lower than default — commanding
-        const val JAVIS_RATE = 0.96f     // Slightly slower — deliberate
-        val PREFERRED_LOCALES = listOf(
-            Locale.UK,          // British English — closest to Jarvis
-            Locale.US,
-            Locale.ENGLISH
-        )
-        // Voice name fragments to prefer (Google TTS UK voices)
+        // Deep, authoritative Jarvis voice
+        const val JAVIS_PITCH = 0.75f   // Noticeably lower than default 1.0
+        const val JAVIS_RATE = 0.93f    // Slightly slower — deliberate and measured
+
+        // Google TTS engine package — better voices than Pico TTS
+        const val GOOGLE_TTS_ENGINE = "com.google.android.tts"
+
         val PREFERRED_VOICE_FRAGMENTS = listOf(
-            "en-gb", "en_gb", "en-GB", "en_GB",
-            "en-us-x-sfg",  // Google male voices
+            "en-gb-x-gbb",   // Google UK English Male
+            "en-gb-x-gbg",
+            "en-gb",
+            "en_gb",
+            "en-us-x-sfg",   // Google US English Male
             "en-us-x-iom",
             "en-us-x-iob",
-            "male"
+            "en-us-x-d0m",
         )
     }
 
@@ -58,7 +59,8 @@ class VoiceManager @Inject constructor(
     }
 
     private fun initTts() {
-        textToSpeech = TextToSpeech(context) { status ->
+        // Try Google TTS first (better voice quality), fall back to default
+        val onInit = TextToSpeech.OnInitListener { status ->
             if (status == TextToSpeech.SUCCESS) {
                 isTtsReady = true
                 applyJavisVoice()
@@ -69,14 +71,20 @@ class VoiceManager @Inject constructor(
                     override fun onDone(utteranceId: String?) {
                         _voiceState.value = VoiceState.Idle
                         onSpeechEnd?.invoke()
+                        onSpeechEnd = null
                     }
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) {
                         _voiceState.value = VoiceState.Idle
+                        onSpeechEnd?.invoke()
+                        onSpeechEnd = null
                     }
                 })
             }
         }
+
+        // Try Google TTS engine first
+        textToSpeech = TextToSpeech(context, onInit, GOOGLE_TTS_ENGINE)
     }
 
     private fun applyJavisVoice() {
@@ -84,64 +92,60 @@ class VoiceManager @Inject constructor(
         tts.setPitch(currentPitch)
         tts.setSpeechRate(currentRate)
 
-        // Attempt to find the best Jarvis-like voice
-        val voices = tts.voices ?: return
-        val best = findBestJavisVoice(voices)
-        if (best != null) {
-            tts.voice = best
-        } else {
-            // Fallback: use UK locale
-            val ukResult = tts.setLanguage(Locale.UK)
-            if (ukResult == TextToSpeech.LANG_NOT_SUPPORTED || ukResult == TextToSpeech.LANG_MISSING_DATA) {
-                tts.setLanguage(Locale.US)
+        val voices = tts.voices
+        if (!voices.isNullOrEmpty()) {
+            val best = findBestJavisVoice(voices)
+            if (best != null) {
+                tts.voice = best
+                return
             }
+        }
+
+        // Fallback: set UK locale for British accent
+        val ukResult = tts.setLanguage(Locale.UK)
+        if (ukResult == TextToSpeech.LANG_NOT_SUPPORTED || ukResult == TextToSpeech.LANG_MISSING_DATA) {
+            tts.setLanguage(Locale.US)
         }
     }
 
     private fun findBestJavisVoice(voices: Set<Voice>): Voice? {
-        // Priority 1: UK English male, not requiring network
-        val ukOfflineMale = voices.filter { v ->
-            !v.isNetworkConnectionRequired &&
-            v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true &&
-            (v.name.lowercase().contains("en-gb") || v.name.lowercase().contains("en_gb")) &&
-            v.name.lowercase().let { n -> n.contains("male") || !n.contains("female") }
-        }.minByOrNull { it.latency }
+        val available = voices.filter { v ->
+            v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
+        }
 
-        if (ukOfflineMale != null) return ukOfflineMale
-
-        // Priority 2: Any UK English voice
-        val ukAny = voices.filter { v ->
-            v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true &&
-            (v.name.lowercase().contains("en-gb") || v.name.lowercase().contains("en_gb") ||
-             v.locale == Locale.UK)
-        }.minByOrNull { it.latency }
-
-        if (ukAny != null) return ukAny
-
-        // Priority 3: Any preferred fragment match
+        // Priority 1: UK English male voice, not requiring network
         PREFERRED_VOICE_FRAGMENTS.forEach { fragment ->
-            val match = voices.firstOrNull { v ->
+            val match = available.firstOrNull { v ->
                 v.name.lowercase().contains(fragment.lowercase()) &&
-                v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true
+                !v.isNetworkConnectionRequired
             }
             if (match != null) return match
         }
 
-        // Priority 4: Any US English male voice
-        return voices.filter { v ->
-            v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true &&
-            (v.locale == Locale.US || v.name.lowercase().contains("en-us")) &&
+        // Priority 2: Any UK English voice
+        available.firstOrNull { v ->
+            v.locale.language == "en" && v.locale.country == "GB"
+        }?.let { return it }
+
+        // Priority 3: Any English male voice
+        available.firstOrNull { v ->
+            v.locale.language == "en" &&
             v.name.lowercase().let { n -> !n.contains("female") && !n.contains("f-") }
-        }.minByOrNull { it.latency }
+        }?.let { return it }
+
+        // Priority 4: Any available English voice
+        return available.firstOrNull { it.locale.language == "en" }
     }
 
     fun startListening(onResult: (String) -> Unit, onEnd: (() -> Unit)? = null) {
         onSpeechResult = onResult
         onSpeechEnd = onEnd
+
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            _voiceState.value = VoiceState.Error("Speech recognition not available")
+            _voiceState.value = VoiceState.Error("Speech recognition unavailable")
             return
         }
+
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -155,25 +159,25 @@ class VoiceManager @Inject constructor(
                 _voiceState.value = VoiceState.Processing
             }
             override fun onError(error: Int) {
-                _voiceState.value = VoiceState.Error(getSpeechErrorMessage(error))
+                val msg = getSpeechError(error)
+                _voiceState.value = VoiceState.Error(msg)
             }
             override fun onResults(results: Bundle?) {
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val text = matches?.firstOrNull() ?: ""
-                if (text.isNotBlank()) {
-                    onSpeechResult?.invoke(text)
-                }
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    ?.firstOrNull() ?: ""
+                if (text.isNotBlank()) onSpeechResult?.invoke(text)
                 _voiceState.value = VoiceState.Idle
             }
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
+
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
         }
         speechRecognizer?.startListening(intent)
     }
@@ -183,32 +187,42 @@ class VoiceManager @Inject constructor(
         _voiceState.value = VoiceState.Idle
     }
 
+    /**
+     * Speak text aloud with JAVIS voice.
+     * Strips JSON action blocks before speaking.
+     * Calls onDone when finished.
+     */
     fun speak(text: String, speechRate: Float = currentRate, onDone: (() -> Unit)? = null) {
-        if (!isTtsReady) return
-        onSpeechEnd = onDone
-        // Strip JSON action blocks before speaking
-        val cleanText = text.replace(Regex("""\{[^{}]*"action"\s*:\s*"LAUNCH_APP"[^{}]*\}"""), "").trim()
-        if (cleanText.isBlank()) {
+        if (!isTtsReady) {
             onDone?.invoke()
             return
         }
+
+        // Strip JSON action blocks
+        val clean = text
+            .replace(Regex("""\{[^{}]*"action"\s*:\s*"[^"]*"[^{}]*\}"""), "")
+            .replace(Regex("""\s{2,}"""), " ")
+            .trim()
+
+        if (clean.isBlank()) {
+            onDone?.invoke()
+            return
+        }
+
+        onSpeechEnd = onDone
         textToSpeech?.setSpeechRate(speechRate)
-        textToSpeech?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, "JAVIS_${System.currentTimeMillis()}")
+        textToSpeech?.speak(
+            clean,
+            TextToSpeech.QUEUE_FLUSH,
+            null,
+            "JAVIS_${System.currentTimeMillis()}"
+        )
     }
 
     fun stopSpeaking() {
         textToSpeech?.stop()
         _voiceState.value = VoiceState.Idle
-    }
-
-    fun setVoice(voiceName: String) {
-        if (voiceName.isBlank()) {
-            applyJavisVoice() // re-apply Javis defaults
-            return
-        }
-        textToSpeech?.voices?.find { it.name == voiceName }?.let {
-            textToSpeech?.voice = it
-        }
+        onSpeechEnd = null
     }
 
     fun setPitch(pitch: Float) {
@@ -221,15 +235,26 @@ class VoiceManager @Inject constructor(
         textToSpeech?.setSpeechRate(rate)
     }
 
+    fun setVoice(voiceName: String) {
+        if (voiceName.isBlank()) {
+            applyJavisVoice()
+            return
+        }
+        textToSpeech?.voices?.find { it.name == voiceName }?.let {
+            textToSpeech?.voice = it
+        }
+    }
+
     fun getAvailableVoices(): List<String> {
         return textToSpeech?.voices
             ?.filter { v ->
                 v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) != true &&
-                (v.locale.language == "en")
+                v.locale.language == "en"
             }
             ?.sortedWith(compareByDescending { v ->
                 when {
-                    v.name.lowercase().contains("en-gb") -> 3
+                    v.name.lowercase().contains("en-gb") -> 4
+                    v.name.lowercase().contains("google") -> 3
                     v.name.lowercase().contains("male") -> 2
                     else -> 1
                 }
@@ -243,16 +268,16 @@ class VoiceManager @Inject constructor(
         textToSpeech?.shutdown()
     }
 
-    private fun getSpeechErrorMessage(error: Int): String = when (error) {
-        SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
+    private fun getSpeechError(error: Int): String = when (error) {
+        SpeechRecognizer.ERROR_AUDIO -> "Audio error"
         SpeechRecognizer.ERROR_CLIENT -> "Client error"
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Microphone permission required"
-        SpeechRecognizer.ERROR_NETWORK -> "Network unavailable"
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission needed"
+        SpeechRecognizer.ERROR_NETWORK -> "No internet"
         SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-        SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
-        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Recogniser busy"
+        SpeechRecognizer.ERROR_NO_MATCH -> "Couldn't hear you"
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Busy"
         SpeechRecognizer.ERROR_SERVER -> "Server error"
-        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timeout"
+        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected"
         else -> "Unknown error"
     }
 }
