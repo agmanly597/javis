@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">JAVIS</string>
+    <string name="notification_service_label">JAVIS Notification Access</string>
+    <string name="accessibility_service_label">JAVIS Accessibility Service</string>
+    <string name="accessibility_service_description">JAVIS uses this service to detect active apps and help you navigate your device hands-free. JAVIS does not perform any hidden actions or bypass Android security.</string>
+    <string name="notification_channel_name">JAVIS Assistant</string>
+    <string name="notification_channel_desc">JAVIS voice assistant notifications</string>
+</resources>

@@ -1,0 +1,5 @@
+## Copy this file to local.properties and fill in your values
+## local.properties is gitignored — your keys stay private
+sdk.dir=/path/to/your/android/sdk
+GROQ_API_KEY=your_groq_key_here
+DEEPSEEK_API_KEY=your_deepseek_key_here

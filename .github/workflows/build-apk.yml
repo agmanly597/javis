@@ -1,0 +1,85 @@
+name: Build JAVIS APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:   # allows manual trigger from GitHub UI
+
+jobs:
+  build:
+    name: Build Debug & Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant gradlew execute permission
+        run: chmod +x gradlew
+
+      - name: Create local.properties
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+        # API keys are injected via GitHub Secrets (Settings → Secrets → Actions)
+        # Add GROQ_API_KEY secret in your GitHub repo settings
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JAVIS-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Build Release APK (unsigned)
+        run: ./gradlew assembleRelease --no-daemon
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JAVIS-release-apk
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 30
+
+      - name: Create GitHub Release (on version tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release-unsigned.apk
+          name: JAVIS ${{ github.ref_name }}
+          body: |
+            ## JAVIS ${{ github.ref_name }}
+            
+            Download the APK below and install it on your Android device.
+            
+            **Debug APK** — ready to install (sideload), includes debug logs  
+            **Release APK** — optimised, unsigned (sign before distributing)
+            
+            ### Install Instructions
+            1. Download `app-debug.apk`
+            2. Enable "Install from unknown sources" in Android Settings
+            3. Open the APK file on your device
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

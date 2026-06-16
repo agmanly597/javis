@@ -1,0 +1,6 @@
+-keep class com.javis.assistant.data.** { *; }
+-keep class com.javis.assistant.domain.model.** { *; }
+-keepattributes Signature
+-keepattributes *Annotation*
+-dontwarn okhttp3.**
+-dontwarn retrofit2.**
