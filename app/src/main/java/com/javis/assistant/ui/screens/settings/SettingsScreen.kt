@@ -29,8 +29,10 @@ fun SettingsScreen(
     val settings by viewModel.settings.collectAsState()
     var showGroqKey by remember { mutableStateOf(false) }
     var showDeepSeekKey by remember { mutableStateOf(false) }
+    var showElevenKey by remember { mutableStateOf(false) }
     var groqKeyInput by remember(settings.groqApiKey) { mutableStateOf(settings.groqApiKey) }
     var deepSeekKeyInput by remember(settings.deepSeekApiKey) { mutableStateOf(settings.deepSeekApiKey) }
+    var elevenLabsKeyInput by remember(settings.elevenLabsApiKey) { mutableStateOf(settings.elevenLabsApiKey) }
     var userNameInput by remember(settings.userName) { mutableStateOf(settings.userName) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
 
@@ -139,6 +141,49 @@ fun SettingsScreen(
                                 }
                             },
                             supportingText = { Text("Required for DeepSeek provider", style = MaterialTheme.typography.labelSmall) }
+                        )
+                    }
+                }
+            }
+
+            // ElevenLabs AI Voice section
+            item {
+                SettingsSection(title = "🎙 JAVIS Voice (ElevenLabs AI)") {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            "Use a real AI voice instead of Android TTS. Free at elevenlabs.io — sign up, copy your API Key, paste below.",
+                            color = JavisOnSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        OutlinedTextField(
+                            value = elevenLabsKeyInput,
+                            onValueChange = { elevenLabsKeyInput = it },
+                            label = { Text("ElevenLabs API Key") },
+                            modifier = Modifier.fillMaxWidth(),
+                            visualTransformation = if (showElevenKey) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            colors = javisTextFieldColors(),
+                            trailingIcon = {
+                                Row {
+                                    IconButton(onClick = { showElevenKey = !showElevenKey }) {
+                                        Icon(
+                                            if (showElevenKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = null, tint = JavisOnSurfaceVariant
+                                        )
+                                    }
+                                    IconButton(onClick = { viewModel.setElevenLabsApiKey(elevenLabsKeyInput) }) {
+                                        Icon(Icons.Default.Check, contentDescription = "Save", tint = JavisBlue)
+                                    }
+                                }
+                            },
+                            supportingText = {
+                                Text(
+                                    if (settings.elevenLabsApiKey.isNotBlank()) "✓ AI voice active — JAVIS uses ElevenLabs"
+                                    else "Leave blank to use Android TTS (default)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (settings.elevenLabsApiKey.isNotBlank()) JavisBlue else JavisOnSurfaceVariant
+                                )
+                            }
                         )
                     }
                 }
