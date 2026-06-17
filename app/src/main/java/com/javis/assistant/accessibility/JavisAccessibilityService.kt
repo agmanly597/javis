@@ -12,19 +12,17 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * Accessibility service that allows JAVIS to:
- * 1. Type messages in WhatsApp (tap-to-send flow)
- * 2. Tap send button after user confirms
- * 3. Track which app is currently open
+ * Accessibility service — gives JAVIS eyes and hands inside other apps:
+ * • WhatsApp typing + send
+ * • Type in any focused search bar / text field
+ * • Answer incoming phone calls
+ * • Track which app is currently active
  */
 class JavisAccessibilityService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    private enum class WhatsAppState {
-        IDLE, IN_CHAT_READY_TO_TYPE, MESSAGE_TYPED, SENT
-    }
-
+    enum class WhatsAppState { IDLE, IN_CHAT_READY_TO_TYPE, MESSAGE_TYPED, SENT }
     private var waState = WhatsAppState.IDLE
     private var pendingMessage: String? = null
 
@@ -32,7 +30,6 @@ class JavisAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         _isEnabled.value = true
-
         serviceInfo = serviceInfo?.apply {
             flags = flags or
                     AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
@@ -44,14 +41,12 @@ class JavisAccessibilityService : AccessibilityService() {
         event ?: return
         val pkg = event.packageName?.toString() ?: return
 
-        // Track the current foreground app
-        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            if (event.className?.toString()?.contains("Activity") == true) {
-                _currentApp.value = pkg
-            }
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            event.className?.toString()?.contains("Activity") == true) {
+            _currentApp.value = pkg
         }
 
-        // WhatsApp chat is open — check if we have a pending message to type
+        // WhatsApp chat typing flow
         if (pkg in WHATSAPP_PACKAGES && waState == WhatsAppState.IN_CHAT_READY_TO_TYPE) {
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
                 event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
@@ -71,41 +66,28 @@ class JavisAccessibilityService : AccessibilityService() {
 
     // ─── WhatsApp Typing ──────────────────────────────────────────────────────
 
-    /**
-     * Called after WhatsApp is opened to a specific chat.
-     * JAVIS will wait for the chat screen to appear, then type [message].
-     * [onTyped] is called with the typed text once done.
-     */
     fun prepareToTypeInWhatsApp(message: String, onTyped: (String) -> Unit) {
         pendingMessage = message
         waState = WhatsAppState.IN_CHAT_READY_TO_TYPE
         onMessageTyped = onTyped
-        // Try typing immediately in case WhatsApp is already open to the chat
         handler.postDelayed({ attemptTypeMessage() }, 1500)
     }
 
     private fun attemptTypeMessage() {
         val msg = pendingMessage ?: return
         val root = rootInActiveWindow ?: return
-        val pkg = root.packageName?.toString() ?: return
-        if (pkg !in WHATSAPP_PACKAGES) return
+        if (root.packageName?.toString() !in WHATSAPP_PACKAGES) return
 
-        // Find message input field (WhatsApp uses this id)
         val inputField = root.findByViewId("entry")
             ?: root.findByViewId("message_input")
             ?: root.findByClassName("android.widget.EditText")
 
-        if (inputField != null) {
-            // Click to focus
-            inputField.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            // Set the text
+        inputField?.let {
+            it.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             val args = Bundle().apply {
-                putCharSequence(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                    msg
-                )
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, msg)
             }
-            val typed = inputField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            val typed = it.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
             if (typed) {
                 waState = WhatsAppState.MESSAGE_TYPED
                 onMessageTyped?.invoke(msg)
@@ -113,13 +95,9 @@ class JavisAccessibilityService : AccessibilityService() {
         }
     }
 
-    /**
-     * Taps the WhatsApp send button. Call this after the user confirms with "send".
-     */
     fun tapSendInWhatsApp(): Boolean {
         val root = rootInActiveWindow ?: return false
-        val pkg = root.packageName?.toString() ?: return false
-        if (pkg !in WHATSAPP_PACKAGES) return false
+        if (root.packageName?.toString() !in WHATSAPP_PACKAGES) return false
 
         val sendBtn = root.findByViewId("send")
             ?: root.findByViewId("send_button")
@@ -141,43 +119,123 @@ class JavisAccessibilityService : AccessibilityService() {
 
     fun isWaitingForSend() = waState == WhatsAppState.MESSAGE_TYPED
 
+    // ─── Type in Any Focused Field ────────────────────────────────────────────
+
+    /**
+     * Types [text] into whatever text field currently has focus on screen.
+     * Works in search bars, browsers, any app.
+     */
+    fun typeInFocusedField(text: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+
+        // Try focused input first
+        val focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        if (focused != null && focused.isEditable) {
+            val bundle = Bundle()
+            bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            return focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
+        }
+
+        // Find any visible EditText
+        val editText = root.findByClassName("android.widget.EditText")
+            ?: root.findByClassName("android.widget.SearchView\$SearchAutoComplete")
+        if (editText != null) {
+            editText.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            handler.postDelayed({
+                val bundle = Bundle()
+                bundle.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+                editText.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
+            }, 300)
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Tap the search/submit button after typing (looks for enter, go, search buttons).
+     */
+    fun tapSearchSubmit(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val btn = root.findByContentDescription("Search")
+            ?: root.findByContentDescription("Go")
+            ?: root.findByViewId("search_button")
+            ?: root.findByViewId("go_button")
+        return btn?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+    }
+
+    // ─── Answer/Decline Calls ─────────────────────────────────────────────────
+
+    /**
+     * Answers an incoming call by finding and tapping the answer button.
+     * Works on most Android phones including MIUI/Redmi.
+     */
+    fun answerCall(): Boolean {
+        val root = rootInActiveWindow ?: return false
+
+        // Try various known answer button IDs (MIUI, stock Android, OEM skins)
+        val answerNode = root.findByViewId("answer_action_icon")
+            ?: root.findByViewId("incoming_call_answer_button")
+            ?: root.findByViewId("btn_accept")
+            ?: root.findByViewId("answer")
+            ?: root.findByContentDescription("Answer")
+            ?: root.findByContentDescription("Accept")
+            ?: root.findByContentDescription("answer call")
+            ?: root.findByText("Answer")
+            ?: root.findByText("Accept")
+
+        return answerNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+    }
+
+    /**
+     * Declines an incoming call.
+     */
+    fun declineCall(): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val declineNode = root.findByViewId("decline_action_icon")
+            ?: root.findByViewId("decline")
+            ?: root.findByViewId("btn_reject")
+            ?: root.findByContentDescription("Decline")
+            ?: root.findByContentDescription("Reject")
+            ?: root.findByText("Decline")
+        return declineNode?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+    }
+
     // ─── Node search helpers ───────────────────────────────────────────────────
 
     private fun AccessibilityNodeInfo.findByViewId(idFragment: String): AccessibilityNodeInfo? {
-        val whatsappPkg = packageName?.toString() ?: "com.whatsapp"
-        val fullId = "$whatsappPkg:id/$idFragment"
-        return findAccessibilityNodeInfosByViewId(fullId)?.firstOrNull()
+        val pkg = packageName?.toString() ?: return null
+        return findAccessibilityNodeInfosByViewId("$pkg:id/$idFragment")?.firstOrNull()
             ?: run {
-                // Try both WhatsApp and Business
-                for (pkg in WHATSAPP_PACKAGES) {
-                    val r = findAccessibilityNodeInfosByViewId("$pkg:id/$idFragment")?.firstOrNull()
+                for (p in listOf("com.whatsapp", "com.whatsapp.w4b", "com.android.server.telecom",
+                    "com.miui.incallui", "com.android.incallui")) {
+                    val r = findAccessibilityNodeInfosByViewId("$p:id/$idFragment")?.firstOrNull()
                     if (r != null) return@run r
                 }
                 null
             }
     }
 
+    private fun AccessibilityNodeInfo.findByText(text: String): AccessibilityNodeInfo? {
+        return findAccessibilityNodeInfosByText(text)?.firstOrNull()
+    }
+
     private fun AccessibilityNodeInfo.findByContentDescription(desc: String): AccessibilityNodeInfo? {
         if (contentDescription?.toString()?.contains(desc, ignoreCase = true) == true) return this
         for (i in 0 until childCount) {
-            val child = getChild(i) ?: continue
-            val found = child.findByContentDescription(desc)
-            if (found != null) return found
+            val f = getChild(i)?.findByContentDescription(desc)
+            if (f != null) return f
         }
         return null
     }
 
     private fun AccessibilityNodeInfo.findByClassName(cls: String): AccessibilityNodeInfo? {
-        if (className?.toString() == cls) return this
+        if (className?.toString() == cls && isVisibleToUser) return this
         for (i in 0 until childCount) {
-            val child = getChild(i) ?: continue
-            val found = child.findByClassName(cls)
-            if (found != null) return found
+            val f = getChild(i)?.findByClassName(cls)
+            if (f != null) return f
         }
         return null
     }
-
-    // ─── Singleton ────────────────────────────────────────────────────────────
 
     companion object {
         val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")

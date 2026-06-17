@@ -14,6 +14,7 @@ import com.javis.assistant.memory.MemoryManager
 import com.javis.assistant.service.JavisActivationBus
 import com.javis.assistant.utils.AppLauncher
 import com.javis.assistant.utils.SystemCommandHandler
+import com.javis.assistant.utils.VoiceNoteHelper
 import com.javis.assistant.voice.VoiceManager
 import com.javis.assistant.voice.VoiceState
 import com.javis.assistant.whatsapp.WhatsAppReplyManager
@@ -34,7 +35,8 @@ data class ChatUiState(
     val error: String? = null,
     val speechRate: Float = 0.93f,
     val continuousMode: Boolean = true,
-    val userName: String = ""
+    val userName: String = "",
+    val isRecordingVoiceNote: Boolean = false
 )
 
 @HiltViewModel
@@ -45,6 +47,7 @@ class ChatViewModel @Inject constructor(
     private val memoryManager: MemoryManager,
     private val whatsAppReplyManager: WhatsAppReplyManager,
     private val systemCommandHandler: SystemCommandHandler,
+    private val voiceNoteHelper: VoiceNoteHelper,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -53,65 +56,52 @@ class ChatViewModel @Inject constructor(
 
     private val gson = Gson()
 
-    /** Multi-turn conversation state machine */
     private enum class ConvState {
         IDLE,
-        AWAITING_WHATSAPP_REPLY_BODY,   // user just said "reply to John" — waiting for message
-        AWAITING_WHATSAPP_SEND_CONFIRM,  // message typed in WhatsApp — waiting for "send"
-        AWAITING_CALL_DISAMBIGUATION     // multiple contacts found — waiting for which one
+        AWAITING_WHATSAPP_REPLY_BODY,
+        AWAITING_WHATSAPP_SEND_CONFIRM,
+        AWAITING_CALL_DISAMBIGUATION,
+        RECORDING_VOICE_NOTE
     }
 
     private var convState = ConvState.IDLE
-    private var pendingTarget: String? = null      // Contact name for pending action
-    private var pendingMessage: String? = null     // Message body for pending WhatsApp reply
-    private val lastResponsesCache = ArrayDeque<String>(5)  // avoid repeating exact responses
+    private var pendingTarget: String? = null
+    private var pendingMessage: String? = null
+    private val recentResponses = ArrayDeque<String>(6)
 
     init {
         observeMessages()
         observeVoiceState()
         observeSettings()
-        warmAppCache()
         observeActivationBus()
+        viewModelScope.launch { AppLauncher.getInstalledApps(context) } // warm cache
     }
 
-    private fun observeActivationBus() {
-        viewModelScope.launch {
-            JavisActivationBus.activations.collect {
-                if (_uiState.value.voiceState is VoiceState.Idle) {
-                    speakGreetingThenListen()
-                }
-            }
+    private fun observeActivationBus() = viewModelScope.launch {
+        JavisActivationBus.activations.collect {
+            if (_uiState.value.voiceState is VoiceState.Idle) speakGreetingThenListen()
         }
     }
 
-    private fun observeMessages() {
-        viewModelScope.launch {
-            chatRepository.getMessages().collect { msgs -> _uiState.update { it.copy(messages = msgs) } }
+    private fun observeMessages() = viewModelScope.launch {
+        chatRepository.getMessages().collect { msgs -> _uiState.update { it.copy(messages = msgs) } }
+    }
+
+    private fun observeVoiceState() = viewModelScope.launch {
+        voiceManager.voiceState.collect { state -> _uiState.update { it.copy(voiceState = state) } }
+    }
+
+    private fun observeSettings() = viewModelScope.launch {
+        settingsRepository.getSettings().collect { s ->
+            _uiState.update { it.copy(speechRate = s.speechRate, continuousMode = s.continuousMode, userName = s.userName) }
+            voiceManager.elevenLabsApiKey = s.elevenLabsApiKey
+            voiceManager.elevenLabsVoiceId = s.elevenLabsVoiceId.ifBlank { com.javis.assistant.voice.ElevenLabsTtsService.DEFAULT_VOICE }
+            voiceManager.setSpeechRate(s.speechRate)
+            if (s.ttsVoice.isNotBlank()) voiceManager.setVoice(s.ttsVoice)
         }
     }
 
-    private fun observeVoiceState() {
-        viewModelScope.launch {
-            voiceManager.voiceState.collect { state -> _uiState.update { it.copy(voiceState = state) } }
-        }
-    }
-
-    private fun observeSettings() {
-        viewModelScope.launch {
-            settingsRepository.getSettings().collect { s ->
-                _uiState.update { it.copy(speechRate = s.speechRate, continuousMode = s.continuousMode, userName = s.userName) }
-                voiceManager.elevenLabsApiKey = s.elevenLabsApiKey
-                voiceManager.setSpeechRate(s.speechRate)
-                if (s.ttsVoice.isNotBlank()) voiceManager.setVoice(s.ttsVoice)
-            }
-        }
-    }
-
-    private fun warmAppCache() {
-        viewModelScope.launch { AppLauncher.getInstalledApps(context) }
-    }
-
-    // ─── Mic Tap ──────────────────────────────────────────────────────────────
+    // ─── Mic ──────────────────────────────────────────────────────────────────
 
     fun onMicTapped() {
         when (_uiState.value.voiceState) {
@@ -125,45 +115,32 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /** Called from MainActivity when activated externally (tile / notification / intent) */
     fun activateFromExternal() {
-        if (_uiState.value.voiceState is VoiceState.Idle) {
-            speakGreetingThenListen()
-        }
+        if (_uiState.value.voiceState is VoiceState.Idle) speakGreetingThenListen()
     }
 
     private fun speakGreetingThenListen() {
         val name = _uiState.value.userName.trim()
-        val greeting = buildGreeting(name)
-        voiceManager.speak(greeting, _uiState.value.speechRate) {
+        voiceManager.speak(buildGreeting(name), _uiState.value.speechRate) {
             viewModelScope.launch { delay(150); startListening() }
         }
     }
 
     private fun buildGreeting(name: String): String {
-        val withName = listOf(
-            "I'm here, $name.",
-            "At your service, $name.",
-            "Yes, $name?",
-            "Ready when you are, $name.",
-            "You rang, $name?",
-            "JAVIS online. What do you need, $name?"
+        val greetings = if (name.isNotBlank()) listOf(
+            "I'm here, $name.", "At your service, $name.", "Yes, $name?",
+            "Ready when you are, $name.", "You rang, $name?",
+            "JAVIS online. What do you need, $name?", "Listening, $name.",
+            "All ears, $name.", "What's up, $name?"
+        ) else listOf(
+            "I'm here.", "At your service.", "Yes?", "Ready.", "Listening.",
+            "JAVIS online.", "You have my attention.", "What's the word?",
+            "All ears.", "Go ahead."
         )
-        val noName = listOf(
-            "I'm here.",
-            "At your service.",
-            "Yes?",
-            "Ready.",
-            "JAVIS online.",
-            "You have my attention."
-        )
-        return (if (name.isNotBlank()) withName else noName).random()
+        return greetings.random()
     }
 
-    fun startListening() {
-        voiceManager.startListening { text -> processInput(text) }
-    }
-
+    fun startListening() = voiceManager.startListening { processInput(it) }
     fun stopListening() = voiceManager.stopListening()
     fun stopSpeaking() = voiceManager.stopSpeaking()
 
@@ -171,19 +148,17 @@ class ChatViewModel @Inject constructor(
         if (_uiState.value.continuousMode) {
             viewModelScope.launch {
                 delay(700)
-                if (_uiState.value.voiceState is VoiceState.Idle && !_uiState.value.isLoading) {
-                    startListening()
-                }
+                if (_uiState.value.voiceState is VoiceState.Idle && !_uiState.value.isLoading) startListening()
             }
         }
     }
 
-    // ─── Input Processing ─────────────────────────────────────────────────────
+    // ─── Input routing ────────────────────────────────────────────────────────
 
     private fun processInput(text: String) {
         val lower = text.lowercase().trim()
 
-        // State-machine handlers for multi-turn flows
+        // State machine — multi-turn flows
         when (convState) {
             ConvState.AWAITING_WHATSAPP_REPLY_BODY -> {
                 val target = pendingTarget ?: run { convState = ConvState.IDLE; sendMessage(text); return }
@@ -193,24 +168,16 @@ class ChatViewModel @Inject constructor(
                 return
             }
             ConvState.AWAITING_WHATSAPP_SEND_CONFIRM -> {
-                if (lower.contains("send") || lower.contains("yes") || lower.contains("ok") ||
-                    lower.contains("do it") || lower.contains("go") || lower.contains("confirm")) {
-                    doWhatsAppSend()
-                } else if (lower.contains("cancel") || lower.contains("stop") || lower.contains("no")) {
+                if (isConfirmWord(lower)) { doWhatsAppSend(); return }
+                if (isCancelWord(lower)) {
                     convState = ConvState.IDLE
                     JavisAccessibilityService.instance?.resetWhatsAppState()
-                    respond("Cancelled. The message has been discarded.", restart = false)
-                } else {
-                    // Treat new input as a new message to type
-                    val target = pendingTarget
-                    if (target != null) {
-                        pendingMessage = text
-                        openWhatsAppWithTyping(target, text)
-                    } else {
-                        convState = ConvState.IDLE
-                        sendMessage(text)
-                    }
+                    respond("Cancelled. Message discarded.", restart = false)
+                    return
                 }
+                val target = pendingTarget
+                if (target != null) { pendingMessage = text; openWhatsAppWithTyping(target, text) }
+                else { convState = ConvState.IDLE; sendMessage(text) }
                 return
             }
             ConvState.AWAITING_CALL_DISAMBIGUATION -> {
@@ -219,7 +186,25 @@ class ChatViewModel @Inject constructor(
                 respond(result.message, restart = !result.requiresFollowUp)
                 return
             }
-            else -> {}
+            ConvState.RECORDING_VOICE_NOTE -> {
+                if (isStopWord(lower)) {
+                    val audioFile = voiceNoteHelper.stopRecording()
+                    _uiState.update { it.copy(isRecordingVoiceNote = false) }
+                    convState = ConvState.IDLE
+                    val target = pendingTarget
+                    if (audioFile != null && target != null) {
+                        voiceNoteHelper.sendVoiceNoteViaWhatsApp(target, audioFile)
+                        respond("Voice note sent to $target.", restart = false)
+                    } else {
+                        respond("Recording stopped.", restart = false)
+                    }
+                } else {
+                    // Continue recording — reassure the user
+                    respond("Still recording. Say 'stop' when done.", restart = false)
+                }
+                return
+            }
+            ConvState.IDLE -> {}
         }
 
         sendMessage(text)
@@ -227,13 +212,39 @@ class ChatViewModel @Inject constructor(
 
     fun sendMessage(text: String) {
         if (text.isBlank()) return
+        val lower = text.lowercase().trim()
+
         viewModelScope.launch {
             chatRepository.insertMessage(ChatMessage(content = text, role = MessageRole.USER))
             _uiState.update { it.copy(isLoading = true, error = null) }
 
-            val lower = text.lowercase()
+            // ── Answer call ──
+            if (isAnswerCallCommand(lower)) {
+                val answered = JavisAccessibilityService.instance?.answerCall() ?: false
+                respond(if (answered) "Call answered." else "Couldn't tap the answer button — tap it manually.", restart = false)
+                return@launch
+            }
 
-            // ── WhatsApp: check messages ──
+            // ── Decline call ──
+            if (isDeclineCallCommand(lower)) {
+                val declined = JavisAccessibilityService.instance?.declineCall() ?: false
+                respond(if (declined) "Call declined." else "Couldn't decline — tap it manually.", restart = false)
+                return@launch
+            }
+
+            // ── Type in current search bar ──
+            val typeText = extractTypeInFieldText(lower)
+            if (typeText != null) {
+                val typed = JavisAccessibilityService.instance?.typeInFocusedField(typeText) ?: false
+                respond(
+                    if (typed) "Typed \"$typeText\" in the search bar."
+                    else "Enable JAVIS Accessibility Service first so I can type on screen.",
+                    restart = false
+                )
+                return@launch
+            }
+
+            // ── Check WhatsApp messages ──
             if (isCheckMessagesCommand(lower)) {
                 val msgs = whatsAppReplyManager.getRecentMessages(10)
                 val spoken = whatsAppReplyManager.buildSpokenSummary(msgs)
@@ -241,17 +252,30 @@ class ChatViewModel @Inject constructor(
                 return@launch
             }
 
-            // ── WhatsApp: reply / send message ──
+            // ── Voice note recording ──
+            val voiceNoteTarget = extractVoiceNoteTarget(lower)
+            if (voiceNoteTarget != null) {
+                pendingTarget = voiceNoteTarget
+                convState = ConvState.RECORDING_VOICE_NOTE
+                val started = voiceNoteHelper.startRecording()
+                _uiState.update { it.copy(isRecordingVoiceNote = started) }
+                respond(
+                    if (started) "Recording now. Speak your message to $voiceNoteTarget — say 'stop' when you're done."
+                    else "Couldn't start recording. Check microphone permission.",
+                    restart = false
+                )
+                return@launch
+            }
+
+            // ── WhatsApp reply ──
             val replyTarget = extractWhatsAppTarget(lower)
             if (replyTarget != null) {
                 val inlineMessage = extractInlineMessage(text)
                 if (inlineMessage != null) {
-                    // "Reply to John saying hello" → go straight to typing
                     pendingTarget = replyTarget
                     convState = ConvState.AWAITING_WHATSAPP_SEND_CONFIRM
                     openWhatsAppWithTyping(replyTarget, inlineMessage)
                 } else {
-                    // "Reply to John" → ask what to say
                     pendingTarget = replyTarget
                     convState = ConvState.AWAITING_WHATSAPP_REPLY_BODY
                     respond("What would you like me to say to $replyTarget?", restart = true)
@@ -259,10 +283,10 @@ class ChatViewModel @Inject constructor(
                 return@launch
             }
 
-            // ── Fast-path app launch ──
-            val fastLaunch = AppLauncher.parseNaturalLanguageCommand(text, context)
-            if (fastLaunch != null) {
-                val action = AppLauncher.tryParseLaunchAction(fastLaunch)
+            // ── Fast-path: resolve open/launch for ANY installed app before hitting AI ──
+            val appAction = AppLauncher.parseNaturalLanguageCommand(text, context)
+            if (appAction != null) {
+                val action = AppLauncher.tryParseLaunchAction(appAction)
                 if (action != null) {
                     val label = action.label ?: "the app"
                     respond(launchQuip(label), restart = false) {
@@ -280,33 +304,32 @@ class ChatViewModel @Inject constructor(
                     memoryManager.extractAndSaveFromConversation(text, raw)
                     handleAiResponse(raw)
                 },
-                onFailure = { err ->
-                    val msg = err.message ?: "Something went wrong, sir."
-                    respond(msg, restart = false)
-                }
+                onFailure = { err -> respond(err.message ?: "Something went wrong.", restart = false) }
             )
         }
     }
 
+    // ─── AI response dispatcher ───────────────────────────────────────────────
+
     private suspend fun handleAiResponse(raw: String) {
-        // Extract the JSON action block if present
         val jsonBlock = extractJsonBlock(raw)
         val spoken = if (jsonBlock != null) {
-            raw.substring(0, raw.indexOf(jsonBlock)).trim().ifBlank {
-                raw.substring(raw.indexOf(jsonBlock) + jsonBlock.length).trim()
-            }.ifBlank { "Right away." }
+            val beforeJson = raw.substring(0, raw.indexOf(jsonBlock)).trim()
+            beforeJson.ifBlank { "Right away." }
         } else raw
 
         if (jsonBlock != null) {
             val obj = runCatching { gson.fromJson(jsonBlock, JsonObject::class.java) }.getOrNull()
-            val action = obj?.get("action")?.asString
-
-            when (action) {
+            when (obj?.get("action")?.asString) {
                 "LAUNCH_APP" -> {
                     val pkg = obj.get("package")?.asString
                     val label = obj.get("label")?.asString ?: "the app"
                     respond(spoken, restart = false) {
-                        AppLauncher.launchApp(context, AppLauncher.LaunchAction("LAUNCH_APP", pkg, label))
+                        // Try the package name first, then fuzzy match label against installed apps
+                        val launched = if (!pkg.isNullOrBlank()) {
+                            AppLauncher.launchApp(context, AppLauncher.LaunchAction("LAUNCH_APP", pkg, label))
+                        } else false
+                        if (!launched) AppLauncher.launchByName(context, label)
                         memoryManager.rememberAppUsage(label)
                     }
                 }
@@ -341,8 +364,7 @@ class ChatViewModel @Inject constructor(
                 }
                 "SET_ALARM" -> {
                     val result = systemCommandHandler.setAlarm(
-                        obj.get("hour")?.asInt ?: 7,
-                        obj.get("minute")?.asInt ?: 0,
+                        obj.get("hour")?.asInt ?: 7, obj.get("minute")?.asInt ?: 0,
                         obj.get("label")?.asString ?: "JAVIS Alarm"
                     )
                     respond(result.message, restart = false)
@@ -357,10 +379,33 @@ class ChatViewModel @Inject constructor(
                 }
                 "SEND_SMS" -> {
                     val result = systemCommandHandler.sendSms(
-                        obj.get("name")?.asString ?: "",
-                        obj.get("message")?.asString ?: ""
+                        obj.get("name")?.asString ?: "", obj.get("message")?.asString ?: ""
                     )
                     respond(result.message, restart = false)
+                }
+                "TYPE_IN_FIELD" -> {
+                    val textToType = obj.get("text")?.asString ?: ""
+                    val typed = JavisAccessibilityService.instance?.typeInFocusedField(textToType) ?: false
+                    respond(
+                        if (typed) spoken.ifBlank { "Typed." }
+                        else "Enable JAVIS Accessibility Service so I can type on screen.",
+                        restart = false
+                    )
+                }
+                "ANSWER_CALL" -> {
+                    val answered = JavisAccessibilityService.instance?.answerCall() ?: false
+                    respond(if (answered) "Answered." else "Tap the answer button manually.", restart = false)
+                }
+                "VOICE_NOTE" -> {
+                    val name = obj.get("name")?.asString ?: ""
+                    pendingTarget = name.ifBlank { null }
+                    convState = ConvState.RECORDING_VOICE_NOTE
+                    val started = voiceNoteHelper.startRecording()
+                    _uiState.update { it.copy(isRecordingVoiceNote = started) }
+                    respond(
+                        if (started) "Recording your voice note${if (name.isNotBlank()) " for $name" else ""}. Say 'stop' when you're done."
+                        else "Couldn't start recording.", restart = false
+                    )
                 }
                 else -> respond(spoken, restart = true)
             }
@@ -369,66 +414,52 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    // ─── WhatsApp Typing via Accessibility ────────────────────────────────────
+    // ─── WhatsApp Typing ──────────────────────────────────────────────────────
 
     private fun openWhatsAppWithTyping(contactName: String, message: String) {
         viewModelScope.launch {
             val accessibility = JavisAccessibilityService.instance
+            systemCommandHandler.openWhatsAppChat(contactName, "")
+            respond("Opening ${contactName}'s chat and typing your message.", restart = false)
 
             if (accessibility != null) {
-                // Open WhatsApp to the contact's chat
-                val waResult = systemCommandHandler.openWhatsAppChat(contactName, "")
-                val responseText = "Opening ${contactName}'s chat and typing your message."
-                respond(responseText, restart = false)
-
-                // Wait for WhatsApp to load, then type
                 delay(2000)
                 accessibility.prepareToTypeInWhatsApp(message) { typed ->
                     viewModelScope.launch {
-                        val confirmMsg = "I've typed \"$typed\" to $contactName. Say 'send' to send it, or say something else to change the message."
-                        respond(confirmMsg, restart = true)
+                        respond(
+                            "Typed \"$typed\" to $contactName. Say 'send' to send it.",
+                            restart = true
+                        )
                     }
                 }
             } else {
-                // Accessibility not enabled — use deep link with pre-filled text
-                val result = systemCommandHandler.openWhatsAppChat(contactName, message)
-                val responseText = if (result.success) {
-                    "Opened ${contactName}'s chat with your message pre-filled. Tap send when ready."
-                } else {
-                    result.message
-                }
+                // No accessibility — use deep link with pre-filled text
+                systemCommandHandler.openWhatsAppChat(contactName, message)
                 convState = ConvState.IDLE
-                respond(responseText, restart = false)
+                respond("Opened ${contactName}'s chat with your message ready. Tap send.", restart = false)
             }
         }
     }
 
     private fun doWhatsAppSend() {
-        val accessibility = JavisAccessibilityService.instance
-        val sent = accessibility?.tapSendInWhatsApp() ?: false
+        val sent = JavisAccessibilityService.instance?.tapSendInWhatsApp() ?: false
         convState = ConvState.IDLE
         pendingTarget = null
         pendingMessage = null
-        if (sent) {
-            respond("Sent. Anything else?", restart = true)
-        } else {
-            respond("I couldn't tap send — please tap it manually. The message should be ready in the chat.", restart = false)
-        }
+        if (sent) respond("Sent.", restart = true)
+        else respond("Tap send manually — the message is already typed.", restart = false)
     }
 
-    // ─── Response Helpers ─────────────────────────────────────────────────────
+    // ─── respond helper ───────────────────────────────────────────────────────
 
     private fun respond(text: String, restart: Boolean, afterSpeak: (() -> Unit)? = null) {
         viewModelScope.launch {
             chatRepository.insertMessage(ChatMessage(content = text, role = MessageRole.ASSISTANT))
             _uiState.update { it.copy(isLoading = false) }
-
-            // Track to avoid exact repetition
-            if (text !in lastResponsesCache) {
-                lastResponsesCache.addLast(text)
-                if (lastResponsesCache.size > 5) lastResponsesCache.removeFirst()
+            if (text !in recentResponses) {
+                recentResponses.addLast(text)
+                if (recentResponses.size > 6) recentResponses.removeFirst()
             }
-
             voiceManager.speak(text, _uiState.value.speechRate) {
                 afterSpeak?.invoke()
                 if (restart) autoRestart()
@@ -436,32 +467,84 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    // ─── Command Parsing ──────────────────────────────────────────────────────
+    // ─── Command parsers ──────────────────────────────────────────────────────
+
+    private fun isAnswerCallCommand(lower: String) =
+        (lower.contains("answer") || lower.contains("pick up") || lower.contains("accept")) &&
+        (lower.contains("call") || lower.contains("phone"))
+
+    private fun isDeclineCallCommand(lower: String) =
+        (lower.contains("decline") || lower.contains("reject") || lower.contains("ignore")) &&
+        (lower.contains("call") || lower.contains("phone"))
 
     private fun isCheckMessagesCommand(lower: String): Boolean {
         val msgWord = lower.contains("message") || lower.contains("whatsapp") ||
                 lower.contains("notif") || lower.contains("inbox") || lower.contains("chat")
         val checkWord = lower.contains("check") || lower.contains("read") || lower.contains("show") ||
-                lower.contains("any") || lower.contains("new") || lower.contains("do i have") ||
-                lower.contains("what") || lower.contains("who")
+                lower.contains("any new") || lower.contains("what") || lower.contains("who messaged")
         return msgWord && checkWord
     }
 
+    private fun isConfirmWord(lower: String) =
+        lower.contains("send") || lower.contains("yes") || lower.contains("ok") ||
+        lower.contains("do it") || lower.contains("go ahead") || lower.contains("confirm") ||
+        lower.contains("sure") || lower == "yeah" || lower == "yep"
+
+    private fun isCancelWord(lower: String) =
+        lower.contains("cancel") || lower.contains("stop") || lower.contains("abort") ||
+        lower.contains("no") || lower.contains("forget")
+
+    private fun isStopWord(lower: String) =
+        lower.contains("stop") || lower.contains("done") || lower.contains("finish") ||
+        lower.contains("end") || lower.contains("that's it") || lower.contains("send it")
+
+    private fun extractTypeInFieldText(lower: String): String? {
+        val patterns = listOf(
+            Regex("type (.+) (?:in|into|on) (?:the )?(?:search|field|bar|input|box)", RegexOption.IGNORE_CASE),
+            Regex("(?:search|type) (?:for )?[\"'](.+)[\"']", RegexOption.IGNORE_CASE),
+            Regex("(?:write|enter|put) (.+) (?:in|into) (?:the )?(?:search|field|bar)", RegexOption.IGNORE_CASE),
+            Regex("type (.+) here", RegexOption.IGNORE_CASE)
+        )
+        for (p in patterns) {
+            val m = p.find(lower) ?: continue
+            val t = m.groupValues[1].trim()
+            if (t.isNotBlank()) return t
+        }
+        return null
+    }
+
+    private fun extractVoiceNoteTarget(lower: String): String? {
+        if (!lower.contains("voice note") && !lower.contains("audio message") &&
+            !lower.contains("voice message") && !lower.contains("record")) return null
+
+        val patterns = listOf(
+            Regex("(?:send|record|make) (?:a )?voice (?:note|message) (?:to|for) (\\w+)", RegexOption.IGNORE_CASE),
+            Regex("(?:send|record) (?:a )?audio (?:message|note) (?:to|for) (\\w+)", RegexOption.IGNORE_CASE)
+        )
+        val stopWords = setOf("a", "the", "my", "me", "this")
+        for (p in patterns) {
+            val m = p.find(lower) ?: continue
+            val name = m.groupValues[1].trim()
+            if (name !in stopWords && name.length > 1) return name.replaceFirstChar { it.uppercase() }
+        }
+        return null
+    }
+
     private fun extractWhatsAppTarget(lower: String): String? {
-        if (!lower.contains("reply") && !lower.contains("respond") &&
-            !lower.contains("send") && !lower.contains("message") && !lower.contains("text")
+        if (!lower.contains("reply") && !lower.contains("respond") && !lower.contains("send") &&
+            !lower.contains("message") && !lower.contains("text") && !lower.contains("whatsapp")
         ) return null
 
         val patterns = listOf(
             Regex("reply to (\\w+)"),
             Regex("respond to (\\w+)"),
-            Regex("send (\\w+) a message"),
+            Regex("send (\\w+) a (?:whatsapp )?message"),
             Regex("send a (?:whatsapp )?message to (\\w+)"),
             Regex("message (\\w+) on whatsapp"),
             Regex("whatsapp (\\w+)"),
             Regex("text (\\w+)")
         )
-        val stopWords = setOf("a", "the", "my", "me", "him", "her", "them", "it", "this", "that")
+        val stopWords = setOf("a", "the", "my", "me", "him", "her", "them", "it", "this", "that", "an")
         for (p in patterns) {
             val m = p.find(lower) ?: continue
             val name = m.groupValues[1]
@@ -495,21 +578,19 @@ class ChatViewModel @Inject constructor(
         }.getOrNull()
     }
 
-    private fun launchQuip(label: String): String = listOf(
-        "Opening $label.",
-        "Launching $label now.",
-        "Right away — $label coming up.",
-        "Consider it done. Opening $label.",
-        "On it. $label, launching."
+    private fun launchQuip(label: String) = listOf(
+        "Opening $label.", "Launching $label.", "On it — $label coming up.",
+        "Opening $label now.", "Done. $label is launching."
     ).random()
 
     // ─── Lifecycle ─────────────────────────────────────────────────────────────
 
-    fun clearHistory() { viewModelScope.launch { chatRepository.clearHistory() } }
-    fun dismissError() { _uiState.update { it.copy(error = null) } }
+    fun clearHistory() = viewModelScope.launch { chatRepository.clearHistory() }
+    fun dismissError() = _uiState.update { it.copy(error = null) }
 
     override fun onCleared() {
         super.onCleared()
         voiceManager.release()
+        voiceNoteHelper.cleanup()
     }
 }
