@@ -242,7 +242,7 @@ class JavisRepository @Inject constructor(
     fun readNotifications(): String {
         val service = JavisNotificationListenerService.getInstance()
             ?: return "Notification access isn't enabled. Go to Settings to allow it."
-        val items = service.getActiveNotifications()
+        val items = service.getFilteredNotifications()
         if (items.isEmpty()) return "You have no active notifications right now."
         return items.take(10).joinToString("\n") { "From ${it.appName}: ${it.title} — ${it.text}" }
     }

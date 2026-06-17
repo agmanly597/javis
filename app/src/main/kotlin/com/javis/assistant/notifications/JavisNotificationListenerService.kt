@@ -75,12 +75,12 @@ class JavisNotificationListenerService : NotificationListenerService() {
         // Can observe removals if needed
     }
 
-    fun getActiveNotifications(): List<NotificationItem> {
+    fun getFilteredNotifications(): List<NotificationItem> {
         return try {
             activeNotifications?.mapNotNull { sbn ->
                 val pkg = sbn.packageName ?: return@mapNotNull null
                 if (IGNORE_PACKAGES.contains(pkg)) return@mapNotNull null
-                val extras = sbn.notification?.extras ?: return@mapNotNull null
+                val extras = sbn.getNotification()?.extras ?: return@mapNotNull null
                 val title = extras.getString("android.title") ?: return@mapNotNull null
                 val text = extras.getCharSequence("android.text")?.toString() ?: ""
                 val appName = try {
