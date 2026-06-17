@@ -10,6 +10,7 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import javax.inject.Singleton
 
 data class DsRequest(
     val model: String,
@@ -30,9 +31,12 @@ interface DeepSeekApi {
     ): DsResponse
 }
 
-class DeepSeekProvider @Inject constructor() : AiProvider {
+@Singleton
+class DeepSeekProvider @Inject constructor() : AiModelProvider {
 
     override val name = "DeepSeek"
+
+    var apiKey: String = ""
 
     private val api: DeepSeekApi by lazy {
         val client = OkHttpClient.Builder()
@@ -68,14 +72,10 @@ class DeepSeekProvider @Inject constructor() : AiProvider {
                 )
             )
             val content = response.choices.firstOrNull()?.message?.content
-                ?: return Result.failure(Exception("Empty response"))
+                ?: return Result.failure(Exception("Empty response from DeepSeek"))
             Result.success(content.trim())
         } catch (e: Exception) {
             Result.failure(e)
         }
-    }
-
-    companion object {
-        var apiKey: String = ""
     }
 }

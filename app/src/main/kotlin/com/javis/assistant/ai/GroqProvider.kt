@@ -11,6 +11,7 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import javax.inject.Singleton
 
 data class GroqRequest(
     val model: String,
@@ -22,9 +23,7 @@ data class GroqRequest(
 
 data class GroqMessage(val role: String, val content: String)
 
-data class GroqResponse(
-    val choices: List<GroqChoice>
-)
+data class GroqResponse(val choices: List<GroqChoice>)
 
 data class GroqChoice(
     val message: GroqMessage,
@@ -39,22 +38,20 @@ interface GroqApi {
     ): GroqResponse
 }
 
-class GroqProvider @Inject constructor() : AiProvider {
+@Singleton
+class GroqProvider @Inject constructor() : AiModelProvider {
 
     override val name = "Groq"
 
+    var apiKey: String = ""
+
     private val api: GroqApi by lazy {
-        val logging = HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.NONE }
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
-            .addInterceptor(logging)
-            .addInterceptor { chain ->
-                val req = chain.request().newBuilder()
-                    .addHeader("Content-Type", "application/json")
-                    .build()
-                chain.proceed(req)
-            }
+            .addInterceptor(HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.NONE
+            })
             .build()
 
         Retrofit.Builder()
@@ -72,9 +69,8 @@ class GroqProvider @Inject constructor() : AiProvider {
         maxTokens: Int
     ): Result<String> {
         return try {
-            val allMessages = mutableListOf(
-                GroqMessage("system", systemPrompt)
-            ) + messages.map { GroqMessage(it.role, it.content) }
+            val allMessages = mutableListOf(GroqMessage("system", systemPrompt)) +
+                    messages.map { GroqMessage(it.role, it.content) }
 
             val response = api.chat(
                 auth = "Bearer $apiKey",
@@ -86,7 +82,7 @@ class GroqProvider @Inject constructor() : AiProvider {
                 )
             )
             val content = response.choices.firstOrNull()?.message?.content
-                ?: return Result.failure(Exception("Empty response"))
+                ?: return Result.failure(Exception("Empty response from Groq"))
             Result.success(content.trim())
         } catch (e: Exception) {
             Result.failure(e)
@@ -95,6 +91,5 @@ class GroqProvider @Inject constructor() : AiProvider {
 
     companion object {
         const val MODEL = "llama-3.3-70b-versatile"
-        var apiKey: String = ""
     }
 }

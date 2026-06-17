@@ -12,6 +12,11 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NotificationModule {
 
+    /**
+     * NotificationPersistenceWorker does NOT have @Inject constructor
+     * so we provide it here. It starts the notification collection coroutine
+     * as soon as it is instantiated.
+     */
     @Provides
     @Singleton
     fun provideNotificationPersistenceWorker(

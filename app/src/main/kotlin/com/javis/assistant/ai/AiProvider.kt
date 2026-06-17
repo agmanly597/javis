@@ -2,7 +2,7 @@ package com.javis.assistant.ai
 
 import com.javis.assistant.data.model.AiMessage
 
-interface AiProvider {
+interface AiModelProvider {
     val name: String
     suspend fun chat(
         messages: List<AiMessage>,
