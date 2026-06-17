@@ -75,7 +75,6 @@ dependencies {
 
     // Hilt
     implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
 
     // Networking
