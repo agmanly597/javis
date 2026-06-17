@@ -1,18 +1,17 @@
 package com.javis.assistant.ui.components
 
-import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.javis.assistant.data.model.Message
@@ -26,9 +25,7 @@ private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 @Composable
 fun MessageBubble(message: Message, modifier: Modifier = Modifier) {
     val isUser = message.role == MessageRole.USER
-    val isSystem = message.role == MessageRole.SYSTEM
-
-    if (isSystem) return // Don't show system messages in chat
+    if (message.role == MessageRole.SYSTEM) return
 
     Row(
         modifier = modifier
@@ -43,12 +40,18 @@ fun MessageBubble(message: Message, modifier: Modifier = Modifier) {
                     .size(30.dp)
                     .clip(RoundedCornerShape(50))
                     .background(
-                        Brush.linearGradient(listOf(CyanAccent.copy(alpha = 0.2f), BlueAccent.copy(alpha = 0.2f)))
+                        Brush.linearGradient(
+                            listOf(CyanAccent.copy(alpha = 0.2f), BlueAccent.copy(alpha = 0.2f))
+                        )
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.SmartToy, contentDescription = "JAVIS",
-                    tint = CyanAccent, modifier = Modifier.size(18.dp))
+                Icon(
+                    Icons.Default.SmartToy,
+                    contentDescription = "JAVIS",
+                    tint = CyanAccent,
+                    modifier = Modifier.size(18.dp)
+                )
             }
             Spacer(Modifier.width(8.dp))
         }
@@ -69,7 +72,9 @@ fun MessageBubble(message: Message, modifier: Modifier = Modifier) {
                     )
                     .background(
                         if (isUser)
-                            Brush.linearGradient(listOf(BlueAccent.copy(0.8f), CyanAccent.copy(0.6f)))
+                            Brush.linearGradient(
+                                listOf(BlueAccent.copy(alpha = 0.8f), CyanAccent.copy(alpha = 0.6f))
+                            )
                         else
                             Brush.linearGradient(listOf(SurfaceDark, SurfaceMid))
                     )
@@ -78,7 +83,7 @@ fun MessageBubble(message: Message, modifier: Modifier = Modifier) {
                 Text(
                     text = message.content,
                     style = MaterialTheme.typography.bodyLarge.copy(
-                        color = if (isUser) TextPrimary else TextPrimary.copy(alpha = 0.92f),
+                        color = TextPrimary.copy(alpha = if (isUser) 1f else 0.92f),
                         lineHeight = 22.sp
                     )
                 )
@@ -96,23 +101,28 @@ fun MessageBubble(message: Message, modifier: Modifier = Modifier) {
 
 @Composable
 fun TypingIndicator() {
+    val infiniteTransition = rememberInfiniteTransition(label = "typing")
+
     Row(
         modifier = Modifier
             .padding(horizontal = 12.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp))
+            .clip(
+                RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
+            )
             .background(SurfaceDark)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         repeat(3) { i ->
-            val anim = rememberInfiniteTransition(label = "dot_$i")
-            val offsetY by anim.animateFloat(
-                initialValue = 0f, targetValue = -6f,
+            val offsetY by infiniteTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = -6f,
                 animationSpec = infiniteRepeatable(
-                    tween(400, delayMillis = i * 130),
-                    RepeatMode.Reverse
-                ), label = "dot_anim_$i"
+                    animation = tween(400, delayMillis = i * 130),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "dot_$i"
             )
             Box(
                 modifier = Modifier

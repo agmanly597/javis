@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build Debug & Release APK
+    name: Build JAVIS APK
     runs-on: ubuntu-latest
 
     steps:
@@ -21,19 +21,23 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: gradle
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
 
       - name: Create local.properties
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}" >> local.properties
           echo "ELEVENLABS_API_KEY=${{ secrets.ELEVENLABS_API_KEY }}" >> local.properties
+
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version=8.7 --distribution-type=bin
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -44,11 +48,11 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/libs.versions.toml') }}
           restore-keys: ${{ runner.os }}-gradle-
 
+      - name: Grant gradlew permission
+        run: chmod +x gradlew
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon --stacktrace
-
-      - name: Build Release APK (unsigned)
-        run: ./gradlew assembleRelease --no-daemon
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -57,26 +61,24 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
 
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: JAVIS-release-unsigned-${{ github.run_number }}
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
-          retention-days: 30
-
       - name: Create GitHub Release
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: JAVIS Build ${{ github.run_number }}
+          name: "JAVIS v${{ github.run_number }}"
           body: |
-            🤖 **JAVIS Auto Build #${{ github.run_number }}**
+            🤖 **JAVIS Build #${{ github.run_number }}**
 
-            Download the APK below and install on your Android device.
-            Minimum Android version: 8.0 (API 26)
-          files: |
-            app/build/outputs/apk/debug/app-debug.apk
+            Install this APK on your Android device (API 26+, Android 8.0+).
+
+            **After installing:**
+            1. Open Settings in JAVIS → add your API keys
+            2. Enable Notification Access (Special App Access in Android Settings)
+            3. Enable Accessibility Service (Accessibility in Android Settings)
+
+            The floating accessibility button will then appear — tap it anywhere to activate JAVIS without opening the app.
+          files: app/build/outputs/apk/debug/app-debug.apk
           draft: false
           prerelease: false
         env:
