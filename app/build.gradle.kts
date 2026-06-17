@@ -1,39 +1,27 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.hilt.android)
+    alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
-}
-
-val localProps = Properties().apply {
-    val f = rootProject.file("local.properties")
-    if (f.exists()) load(f.inputStream())
 }
 
 android {
     namespace = "com.javis.assistant"
-    compileSdk = 35
+    compileSdk = 34
 
     defaultConfig {
         applicationId = "com.javis.assistant"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 34
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        buildConfigField(
-            "String", "GROQ_API_KEY",
-            "\"${System.getenv("GROQ_API_KEY") ?: localProps["GROQ_API_KEY"] ?: ""}\""
-        )
-        buildConfigField(
-            "String", "DEEPSEEK_API_KEY",
-            "\"${System.getenv("DEEPSEEK_API_KEY") ?: localProps["DEEPSEEK_API_KEY"] ?: ""}\""
-        )
+        buildConfigField("String", "GROQ_API_KEY", "\"${project.findProperty("GROQ_API_KEY") ?: ""}\"")
+        buildConfigField("String", "ELEVENLABS_API_KEY", "\"${project.findProperty("ELEVENLABS_API_KEY") ?: ""}\"")
+        buildConfigField("String", "DEEPSEEK_API_KEY", "\"${project.findProperty("DEEPSEEK_API_KEY") ?: ""}\"")
     }
 
     buildTypes {
@@ -47,7 +35,6 @@ android {
         }
         debug {
             isDebuggable = true
-            applicationIdSuffix = ".debug"
         }
     }
 
@@ -76,34 +63,54 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.splashscreen)
-
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
-    implementation(libs.androidx.navigation.compose)
+    implementation(libs.navigation.compose)
 
+    // Hilt
     implementation(libs.hilt.android)
-    ksp(libs.hilt.android.compiler)
+    ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
 
+    // Networking
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.gson)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+
+    // Room
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
 
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.converter.gson)
-    implementation(libs.okhttp)
-    implementation(libs.okhttp.logging.interceptor)
-
-    implementation(libs.coroutines.android)
+    // DataStore
     implementation(libs.datastore.preferences)
+
+    // Coroutines
+    implementation(libs.coroutines.android)
+
+    // Gson
     implementation(libs.gson)
+
+    // Permissions
     implementation(libs.accompanist.permissions)
 
+    // Media
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
+
+    // Testing
+    testImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }

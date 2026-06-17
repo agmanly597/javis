@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">JAVIS</string>
-    <string name="notification_service_label">JAVIS Notification Access</string>
-    <string name="accessibility_service_label">JAVIS Accessibility Service</string>
-    <string name="accessibility_service_description">JAVIS uses this service to detect active apps and help you navigate your device hands-free. JAVIS does not perform any hidden actions or bypass Android security.</string>
-    <string name="notification_channel_name">JAVIS Assistant</string>
-    <string name="notification_channel_desc">JAVIS voice assistant notifications</string>
+    <string name="accessibility_service_label">JAVIS Assistant</string>
+    <string name="accessibility_service_description">JAVIS uses accessibility to read screen content, interact with apps like WhatsApp, help navigate your device, and execute voice commands hands-free. No data is sent without your confirmation.</string>
+    <string name="notification_channel_voice">JAVIS Voice</string>
+    <string name="notification_channel_voice_desc">Running voice assistant session</string>
+    <string name="notification_title_listening">JAVIS is listening…</string>
+    <string name="notification_text_tap_stop">Tap to stop</string>
+    <string name="greeting_morning">Good morning! JAVIS online. How can I assist?</string>
+    <string name="greeting_afternoon">Good afternoon! JAVIS ready. What do you need?</string>
+    <string name="greeting_evening">Good evening! JAVIS at your service.</string>
+    <string name="greeting_night">Hey, it\'s late. JAVIS is here though. What\'s up?</string>
 </resources>

@@ -1,6 +1,8 @@
--keep class com.javis.assistant.data.** { *; }
--keep class com.javis.assistant.domain.model.** { *; }
+-keep class com.javis.assistant.** { *; }
+-keep class com.google.gson.** { *; }
 -keepattributes Signature
 -keepattributes *Annotation*
 -dontwarn okhttp3.**
 -dontwarn retrofit2.**
+-keep class retrofit2.** { *; }
+-keep interface retrofit2.** { *; }

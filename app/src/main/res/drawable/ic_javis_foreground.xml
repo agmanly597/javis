@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- JAVIS icon: stylized "J" in cyan on dark background -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer hexagonal ring -->
+    <path
+        android:fillColor="#00D4FF"
+        android:pathData="M54,12 L88,31 L88,69 L54,88 L20,69 L20,31 Z"
+        android:fillAlpha="0.15"/>
+
+    <!-- Inner ring -->
+    <path
+        android:strokeColor="#00D4FF"
+        android:strokeWidth="2"
+        android:fillColor="#00000000"
+        android:pathData="M54,18 L84,35 L84,69 L54,86 L24,69 L24,35 Z"/>
+
+    <!-- "J" letter -->
+    <path
+        android:fillColor="#00D4FF"
+        android:pathData="M58,32 L64,32 L64,66 Q64,76 54,76 Q44,76 44,66 L44,62 L50,62 L50,66 Q50,70 54,70 Q58,70 58,66 Z"/>
+
+    <!-- Accent dot -->
+    <circle
+        android:fillColor="#00D4FF"
+        android:cx="61"
+        android:cy="28"
+        android:r="3"/>
+</vector>

@@ -12,12 +12,6 @@
 /captures
 .externalNativeBuild
 .cxx
+local.properties
 *.jks
 *.keystore
-/app/release/
-*.apk
-*.aab
-*.b64
-
-# NEVER commit secrets
-local.properties
