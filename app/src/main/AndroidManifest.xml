@@ -4,7 +4,6 @@
     <!-- Network -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
     <!-- Voice -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -17,7 +16,6 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission android:name="android.permission.MANAGE_MEDIA" />
 
     <!-- Notifications -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -26,8 +24,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
-    <!-- Camera -->
+    <!-- Camera & Torch -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
 
     <!-- Phone & Contacts -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -35,23 +34,26 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
-    <!-- Location (for maps / contextual help) -->
+    <!-- Location -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- System -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.NFC" />
-    <uses-permission android:name="android.permission.FLASHLIGHT" />
 
-    <!-- Package queries — needed to check installed apps -->
+    <!-- Needed to query all installed apps for dynamic launcher -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <!-- Package queries — explicit list for older Android versions -->
     <queries>
         <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
         <package android:name="com.google.android.youtube" />
         <package android:name="com.android.chrome" />
         <package android:name="com.google.android.apps.maps" />
@@ -70,6 +72,7 @@
         <package android:name="com.google.android.gm" />
         <package android:name="com.android.vending" />
         <package android:name="com.google.android.calendar" />
+        <package android:name="com.google.android.tts" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
@@ -79,7 +82,13 @@
             <action android:name="android.intent.action.DIAL" />
         </intent>
         <intent>
+            <action android:name="android.intent.action.CALL" />
+        </intent>
+        <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.SEARCH" />
         </intent>
     </queries>
 
@@ -89,6 +98,7 @@
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
     <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:name=".JavisApplication"
@@ -102,19 +112,44 @@
         android:largeHeap="false"
         android:requestLegacyExternalStorage="true">
 
+        <!-- Main Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.JAVIS.SplashScreen"
-            android:screenOrientation="portrait">
+            android:screenOrientation="portrait"
+            android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Allows activation from tile/notification -->
+            <intent-filter>
+                <action android:name="com.javis.assistant.ACTION_ACTIVATE_VOICE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
-        <!-- Notification Listener Service -->
+        <!-- Persistent background service (keeps JAVIS alive, notification button) -->
+        <service
+            android:name=".service.JavisBackgroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- Quick Settings Tile (user drags to notification shade → one tap activates JAVIS) -->
+        <service
+            android:name=".service.JavisTileService"
+            android:exported="true"
+            android:label="JAVIS"
+            android:icon="@mipmap/ic_launcher"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Notification Listener Service (WhatsApp message capture) -->
         <service
             android:name=".notifications.JavisNotificationListenerService"
             android:label="@string/notification_service_label"
@@ -125,7 +160,7 @@
             </intent-filter>
         </service>
 
-        <!-- Accessibility Service -->
+        <!-- Accessibility Service (WhatsApp UI typing, app automation) -->
         <service
             android:name=".accessibility.JavisAccessibilityService"
             android:label="@string/accessibility_service_label"
@@ -139,7 +174,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- FileProvider for sharing files -->
+        <!-- FileProvider -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

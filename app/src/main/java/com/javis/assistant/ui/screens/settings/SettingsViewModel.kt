@@ -37,6 +37,14 @@ class SettingsViewModel @Inject constructor(
         settingsRepository.updateDeepSeekApiKey(key)
     }
 
+    fun setElevenLabsApiKey(key: String) = viewModelScope.launch {
+        settingsRepository.updateElevenLabsApiKey(key)
+    }
+
+    fun setElevenLabsVoiceId(id: String) = viewModelScope.launch {
+        settingsRepository.updateElevenLabsVoiceId(id)
+    }
+
     fun setSpeechRate(rate: Float) = viewModelScope.launch {
         settingsRepository.updateSpeechRate(rate)
     }

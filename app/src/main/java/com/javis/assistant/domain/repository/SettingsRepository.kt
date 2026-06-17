@@ -9,6 +9,8 @@ interface SettingsRepository {
     suspend fun updateProvider(provider: AiProvider)
     suspend fun updateGroqApiKey(key: String)
     suspend fun updateDeepSeekApiKey(key: String)
+    suspend fun updateElevenLabsApiKey(key: String)
+    suspend fun updateElevenLabsVoiceId(id: String)
     suspend fun updateSpeechRate(rate: Float)
     suspend fun updateTtsVoice(voice: String)
     suspend fun updateNotificationsEnabled(enabled: Boolean)

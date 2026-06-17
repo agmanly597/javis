@@ -10,9 +10,7 @@ data class ChatMessage(
     val isLoading: Boolean = false
 )
 
-enum class MessageRole {
-    USER, ASSISTANT, SYSTEM
-}
+enum class MessageRole { USER, ASSISTANT, SYSTEM }
 
 data class UserMemory(
     val id: String = UUID.randomUUID().toString(),
@@ -22,9 +20,7 @@ data class UserMemory(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-enum class MemoryCategory {
-    PERSONAL, PREFERENCE, APP_USAGE, COMMAND, GENERAL
-}
+enum class MemoryCategory { PERSONAL, PREFERENCE, APP_USAGE, COMMAND, GENERAL }
 
 data class NotificationItem(
     val id: String = UUID.randomUUID().toString(),
@@ -40,10 +36,12 @@ data class AiSettings(
     val provider: AiProvider = AiProvider.GROQ,
     val groqApiKey: String = "",
     val deepSeekApiKey: String = "",
-    val speechRate: Float = 1.0f,
+    val elevenLabsApiKey: String = "",         // AI voice — free at elevenlabs.io
+    val elevenLabsVoiceId: String = "",        // blank = use default Jarvis voice (Daniel)
+    val speechRate: Float = 0.93f,
     val ttsVoice: String = "",
     val notificationsEnabled: Boolean = true,
-    val continuousMode: Boolean = false,
+    val continuousMode: Boolean = true,        // keep mic alive after each response
     val userName: String = ""
 )
 
