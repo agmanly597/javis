@@ -58,6 +58,12 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    sourceSets {
+        named("main") {
+            java.setSrcDirs(listOf("src/main/kotlin"))
+        }
+    }
 }
 
 dependencies {
