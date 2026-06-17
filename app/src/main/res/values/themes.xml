@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Parent must be AppCompat-based for Compose apps using AGP 8+ -->
-    <style name="Theme.JAVIS" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <!--
+        For a pure Jetpack Compose app, we use the Android framework theme
+        android:Theme.DeviceDefault.NoActionBar — no extra library dependency needed.
+        All visual styling is done in Compose via MaterialTheme; this XML theme
+        is only used for the initial window decoration.
+    -->
+    <style name="Theme.JAVIS" parent="android:Theme.DeviceDefault.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">@color/bg_dark</item>
